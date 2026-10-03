@@ -21,7 +21,7 @@ add_subdirectory("${DUSKLIGHT_DIR}/sdk" dusklight-sdk EXCLUDE_FROM_ALL)
 configure_file(mod.json.in "${CMAKE_CURRENT_BINARY_DIR}/mod.json" @ONLY NEWLINE_STYLE LF)
 
 add_mod(dof_hq
-        FEATURES game webgpu fmt
+        FEATURES game webgpu
         SOURCES src/mod.cpp
         MOD_JSON "${CMAKE_CURRENT_BINARY_DIR}/mod.json"
         RES_DIR res

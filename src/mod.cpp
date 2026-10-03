@@ -20,7 +20,6 @@
 #include "mods/svc/hook.h"
 #include "mods/svc/hook.hpp"
 #include "mods/svc/log.h"
-#include "mods/svc/log.hpp"
 #include "mods/svc/resource.h"
 #include "mods/svc/ui.h"
 
@@ -76,8 +75,7 @@ namespace
         return value;
     }
 
-    ModResult register_bool_option(
-        const char *name, bool defaultValue, ConfigVarHandle &outHandle, ModError *error)
+    ModResult register_bool_option(const char *name, bool defaultValue, ConfigVarHandle &outHandle, ModError *error)
     {
         ConfigVarDesc desc = CONFIG_VAR_DESC_INIT;
         desc.name = name;
@@ -402,7 +400,7 @@ namespace
         const float ambientFarDistance =
             static_cast<float>(std::clamp<int64_t>(get_int_option(g_cvarAmbientFarDistance, 8000), 0, 20000));
         const bool ambientEnabled = get_bool_option(g_cvarAmbientEnabled, true);
-        const bool hasGameFocus = alpha > -254.0f;
+        const bool hasGameFocus = (alpha > -254.0f);
         if (!hasGameFocus && (!ambientEnabled || ambientFarBlur <= 0.0f))
         {
             return false; // disable the effect (no gather pass)
@@ -410,11 +408,6 @@ namespace
 
         const float attentionPoint = g_env_light.mDemoAttentionPoint;
         const bool hasAttention = (0.0f != attentionPoint);
-        if (hasAttention)
-        {
-            mods::log::debug("** attentionPoint = {}, hasAttention = {}", attentionPoint, hasAttention);
-        }
-
         const float intensity =
             static_cast<float>(std::clamp<int64_t>(get_int_option(g_cvarIntensity, 60), 0, 200)) /
             100.0f;
