@@ -106,3 +106,8 @@ fn fs_main(v: VO) -> @location(0) vec4<f32> {
     }
     return vec4<f32>(acc / wsum, smoothstep(0.5, 2.0, r));
 }
+
+@fragment
+fn fs_composite(v: VO) -> @location(0) vec4<f32> {
+    return textureSampleLevel(colorTex, samp, v.uv, 0.0);
+}

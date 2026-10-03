@@ -54,6 +54,7 @@ namespace
     ConfigVarHandle g_cvarFarFalloff = 0;         // % of focus distance
     ConfigVarHandle g_cvarNearFalloff = 0;        // % of focus distance
     ConfigVarHandle g_cvarTapCount = 0;           // number of taps in the gather pass
+    ConfigVarHandle g_cvarHalfResolution = 0;     // run the gather pass at half resolution (faster, but blurrier)
 
     int64_t get_int_option(ConfigVarHandle handle, int64_t fallback)
     {
@@ -112,8 +113,12 @@ namespace
     WGPUShaderModule g_module = nullptr;
     WGPUBindGroupLayout g_bgl = nullptr;
     WGPUPipelineLayout g_pipelineLayout = nullptr;
+    WGPUBindGroupLayout g_compositeBgl = nullptr;
+    WGPUPipelineLayout g_compositePipelineLayout = nullptr;
     WGPUSampler g_sampler = nullptr;
-    WGPURenderPipeline g_pipeline = nullptr;
+    WGPURenderPipeline g_gatherPipeline = nullptr;
+    WGPURenderPipeline g_compositePipeline = nullptr;
+    GfxRenderTargetLayout g_gatherTargetLayout = GFX_RENDER_TARGET_LAYOUT_INIT;
     GfxRenderTargetLayout g_sceneTargetLayout = GFX_RENDER_TARGET_LAYOUT_INIT;
 
     // Mirror of the WGSL struct P (keep in sync with res/dof_hq.wgsl).
@@ -140,20 +145,27 @@ namespace
     struct DrawPayload
     {
         WGPUTextureView color; // frame-pooled
-        WGPUTextureView depth; // frame-pooled
+        WGPUTextureView depth; // frame-pooled for gather, unused for composite
         uint32_t uniform_offset;
         uint32_t uniform_size;
+        uint32_t composite;
     };
     static_assert(sizeof(DrawPayload) <= GFX_INLINE_DRAW_PAYLOAD_SIZE);
     static_assert(std::is_trivially_copyable_v<DrawPayload>);
 
     void release_pipeline()
     {
-        if (g_pipeline != nullptr)
+        if (g_gatherPipeline != nullptr)
         {
-            wgpuRenderPipelineRelease(g_pipeline);
-            g_pipeline = nullptr;
+            wgpuRenderPipelineRelease(g_gatherPipeline);
+            g_gatherPipeline = nullptr;
         }
+        if (g_compositePipeline != nullptr)
+        {
+            wgpuRenderPipelineRelease(g_compositePipeline);
+            g_compositePipeline = nullptr;
+        }
+        g_gatherTargetLayout = GFX_RENDER_TARGET_LAYOUT_INIT;
         g_sceneTargetLayout = GFX_RENDER_TARGET_LAYOUT_INIT;
     }
 
@@ -170,10 +182,20 @@ namespace
             wgpuPipelineLayoutRelease(g_pipelineLayout);
             g_pipelineLayout = nullptr;
         }
+        if (g_compositePipelineLayout != nullptr)
+        {
+            wgpuPipelineLayoutRelease(g_compositePipelineLayout);
+            g_compositePipelineLayout = nullptr;
+        }
         if (g_bgl != nullptr)
         {
             wgpuBindGroupLayoutRelease(g_bgl);
             g_bgl = nullptr;
+        }
+        if (g_compositeBgl != nullptr)
+        {
+            wgpuBindGroupLayoutRelease(g_compositeBgl);
+            g_compositeBgl = nullptr;
         }
         if (g_module != nullptr)
         {
@@ -226,12 +248,41 @@ namespace
             return false;
         }
 
+        WGPUBindGroupLayoutEntry compositeEntries[2] = {
+            WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT};
+        compositeEntries[0].binding = 1;
+        compositeEntries[0].visibility = WGPUShaderStage_Fragment;
+        compositeEntries[0].texture.sampleType = WGPUTextureSampleType_Float;
+        compositeEntries[0].texture.viewDimension = WGPUTextureViewDimension_2D;
+        compositeEntries[1].binding = 3;
+        compositeEntries[1].visibility = WGPUShaderStage_Fragment;
+        compositeEntries[1].sampler.type = WGPUSamplerBindingType_Filtering;
+        WGPUBindGroupLayoutDescriptor compositeBglDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+        compositeBglDesc.label = {"dof_hq composite bgl", WGPU_STRLEN};
+        compositeBglDesc.entryCount = 2;
+        compositeBglDesc.entries = compositeEntries;
+        g_compositeBgl = wgpuDeviceCreateBindGroupLayout(device, &compositeBglDesc);
+        if (g_compositeBgl == nullptr)
+        {
+            return false;
+        }
+
         WGPUPipelineLayoutDescriptor plDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
         plDesc.label = {"dof_hq pipeline layout", WGPU_STRLEN};
         plDesc.bindGroupLayoutCount = 1;
         plDesc.bindGroupLayouts = &g_bgl;
         g_pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &plDesc);
         if (g_pipelineLayout == nullptr)
+        {
+            return false;
+        }
+
+        WGPUPipelineLayoutDescriptor compositePlDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+        compositePlDesc.label = {"dof_hq composite pipeline layout", WGPU_STRLEN};
+        compositePlDesc.bindGroupLayoutCount = 1;
+        compositePlDesc.bindGroupLayouts = &g_compositeBgl;
+        g_compositePipelineLayout = wgpuDeviceCreatePipelineLayout(device, &compositePlDesc);
+        if (g_compositePipelineLayout == nullptr)
         {
             return false;
         }
@@ -244,15 +295,8 @@ namespace
         return g_sampler != nullptr;
     }
 
-    // Scene attachments can change at runtime, so rebuild lazily on layout.key changes.
-    bool ensure_pipeline(const GfxRenderTargetLayout &layout)
+    bool build_pipeline(const GfxRenderTargetLayout &layout, bool composite, WGPURenderPipeline &pipeline)
     {
-        if (g_pipeline != nullptr && g_sceneTargetLayout.key == layout.key)
-        {
-            return true;
-        }
-        release_pipeline();
-
         WGPUBlendState blendState{
             .color = {.operation = WGPUBlendOperation_Add,
                       .srcFactor = WGPUBlendFactor_SrcAlpha,
@@ -263,13 +307,16 @@ namespace
         };
         WGPUColorTargetState colorTargets[GFX_MAX_COLOR_ATTACHMENTS];
         const uint32_t colorTargetCount = gfx_init_color_target_states(&layout, colorTargets,
-                                                                       &blendState,
+                                                                       composite ? &blendState : nullptr,
                                                                        static_cast<WGPUColorWriteMask>(
-                                                                           WGPUColorWriteMask_Red | WGPUColorWriteMask_Green | WGPUColorWriteMask_Blue));
+                                                                           composite ? (WGPUColorWriteMask_Red |
+                                                                                        WGPUColorWriteMask_Green |
+                                                                                        WGPUColorWriteMask_Blue)
+                                                                                     : WGPUColorWriteMask_All));
 
         WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
         fragment.module = g_module;
-        fragment.entryPoint = {"fs_main", WGPU_STRLEN};
+        fragment.entryPoint = {composite ? "fs_composite" : "fs_main", WGPU_STRLEN};
         fragment.targetCount = colorTargetCount;
         fragment.targets = colorTargets;
 
@@ -279,20 +326,37 @@ namespace
         depthStencil.depthCompare = WGPUCompareFunction_Always;
 
         WGPURenderPipelineDescriptor pipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-        pipelineDesc.label = {"dof_hq", WGPU_STRLEN};
-        pipelineDesc.layout = g_pipelineLayout;
+        pipelineDesc.label = {composite ? "dof_hq composite" : "dof_hq gather", WGPU_STRLEN};
+        pipelineDesc.layout = composite ? g_compositePipelineLayout : g_pipelineLayout;
         pipelineDesc.vertex.module = g_module;
         pipelineDesc.vertex.entryPoint = {"vs_main", WGPU_STRLEN};
         pipelineDesc.primitive.topology = WGPUPrimitiveTopology_TriangleList;
         pipelineDesc.depthStencil = &depthStencil;
         pipelineDesc.multisample.count = layout.sample_count;
         pipelineDesc.fragment = &fragment;
-        g_pipeline = wgpuDeviceCreateRenderPipeline(g_deviceInfo.device, &pipelineDesc);
-        if (g_pipeline == nullptr)
+        pipeline = wgpuDeviceCreateRenderPipeline(g_deviceInfo.device, &pipelineDesc);
+        return pipeline != nullptr;
+    }
+
+    // Scene and offscreen attachments can change at runtime, so rebuild lazily on layout.key changes.
+    bool ensure_pipeline(const GfxRenderTargetLayout &layout, bool composite)
+    {
+        WGPURenderPipeline &pipeline = composite ? g_compositePipeline : g_gatherPipeline;
+        GfxRenderTargetLayout &cachedLayout = composite ? g_sceneTargetLayout : g_gatherTargetLayout;
+        if (pipeline != nullptr && cachedLayout.key == layout.key)
+        {
+            return true;
+        }
+        if (pipeline != nullptr)
+        {
+            wgpuRenderPipelineRelease(pipeline);
+            pipeline = nullptr;
+        }
+        if (!build_pipeline(layout, composite, pipeline))
         {
             return false;
         }
-        g_sceneTargetLayout = layout;
+        cachedLayout = layout;
         return true;
     }
 
@@ -300,32 +364,47 @@ namespace
     void on_draw(
         ModContext *, const GfxDrawContext *ctx, const void *payload, size_t payloadSize, void *)
     {
-        if (payloadSize != sizeof(DrawPayload) || !ensure_pipeline(ctx->layout))
+        if (payloadSize != sizeof(DrawPayload))
         {
             return;
         }
         DrawPayload data;
         std::memcpy(&data, payload, sizeof(data));
-        if (data.color == nullptr || data.depth == nullptr || ctx->uniform_buffer == nullptr)
+        if (data.color == nullptr || (!data.composite && data.depth == nullptr) ||
+            (!data.composite && ctx->uniform_buffer == nullptr) ||
+            !ensure_pipeline(ctx->layout, data.composite != 0))
         {
             return;
         }
 
         WGPUBindGroupEntry entries[4] = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT,
                                          WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
-        entries[0].binding = 0;
-        entries[0].buffer = ctx->uniform_buffer;
-        entries[0].offset = data.uniform_offset;
-        entries[0].size = data.uniform_size;
-        entries[1].binding = 1;
-        entries[1].textureView = data.color;
-        entries[2].binding = 2;
-        entries[2].textureView = data.depth;
-        entries[3].binding = 3;
-        entries[3].sampler = g_sampler;
+        uint32_t entryCount = 0;
+        if (data.composite)
+        {
+            entries[0].binding = 1;
+            entries[0].textureView = data.color;
+            entries[1].binding = 3;
+            entries[1].sampler = g_sampler;
+            entryCount = 2;
+        }
+        else
+        {
+            entries[0].binding = 0;
+            entries[0].buffer = ctx->uniform_buffer;
+            entries[0].offset = data.uniform_offset;
+            entries[0].size = data.uniform_size;
+            entries[1].binding = 1;
+            entries[1].textureView = data.color;
+            entries[2].binding = 2;
+            entries[2].textureView = data.depth;
+            entries[3].binding = 3;
+            entries[3].sampler = g_sampler;
+            entryCount = 4;
+        }
         WGPUBindGroupDescriptor bindGroupDesc = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
-        bindGroupDesc.layout = g_bgl;
-        bindGroupDesc.entryCount = 4;
+        bindGroupDesc.layout = data.composite ? g_compositeBgl : g_bgl;
+        bindGroupDesc.entryCount = entryCount;
         bindGroupDesc.entries = entries;
         WGPUBindGroup bindGroup = wgpuDeviceCreateBindGroup(ctx->device, &bindGroupDesc);
         if (bindGroup == nullptr)
@@ -333,7 +412,8 @@ namespace
             return;
         }
 
-        wgpuRenderPassEncoderSetPipeline(ctx->pass, g_pipeline);
+        wgpuRenderPassEncoderSetPipeline(
+            ctx->pass, data.composite ? g_compositePipeline : g_gatherPipeline);
         wgpuRenderPassEncoderSetBindGroup(ctx->pass, 0, bindGroup, 0, nullptr);
         wgpuRenderPassEncoderDraw(ctx->pass, 3, 1, 0, 0);
         wgpuBindGroupRelease(bindGroup);
@@ -491,14 +571,43 @@ namespace
             return;
         }
 
-        GfxRange uniformRange{0, 0};
-        if (svc_gfx->push_uniform(mod_ctx, &params, sizeof(params), &uniformRange) != MOD_OK)
+        const uint32_t divisor = get_bool_option(g_cvarHalfResolution, false) ? 2u : 1u;
+        const uint32_t gatherWidth = std::max((resolved.width + divisor - 1u) / divisor, 1u);
+        const uint32_t gatherHeight = std::max((resolved.height + divisor - 1u) / divisor, 1u);
+        if (svc_gfx->create_pass(mod_ctx, gatherWidth, gatherHeight) != MOD_OK)
         {
             return;
         }
-        const DrawPayload payload{
-            resolved.color, resolved.depth, uniformRange.offset, uniformRange.size};
-        svc_gfx->push_draw(mod_ctx, g_drawType, &payload, sizeof(payload));
+
+        GfxRange uniformRange{0, 0};
+        if (svc_gfx->push_uniform(mod_ctx, &params, sizeof(params), &uniformRange) != MOD_OK)
+        {
+            GfxResolveDesc closeDesc = GFX_RESOLVE_DESC_INIT;
+            closeDesc.color = false;
+            svc_gfx->resolve_pass(mod_ctx, &closeDesc, &resolved);
+            return;
+        }
+        const DrawPayload gatherPayload{
+            resolved.color, resolved.depth, uniformRange.offset, uniformRange.size, 0};
+        if (svc_gfx->push_draw(mod_ctx, g_drawType, &gatherPayload, sizeof(gatherPayload)) != MOD_OK)
+        {
+            GfxResolveDesc closeDesc = GFX_RESOLVE_DESC_INIT;
+            closeDesc.color = false;
+            svc_gfx->resolve_pass(mod_ctx, &closeDesc, &resolved);
+            return;
+        }
+
+        GfxResolveDesc gatherResolveDesc = GFX_RESOLVE_DESC_INIT;
+        gatherResolveDesc.depth = false;
+        GfxResolvedTargets gathered = GFX_RESOLVED_TARGETS_INIT;
+        if (svc_gfx->resolve_pass(mod_ctx, &gatherResolveDesc, &gathered) != MOD_OK ||
+            gathered.color == nullptr)
+        {
+            return;
+        }
+
+        const DrawPayload compositePayload{gathered.color, nullptr, 0, 0, 1};
+        svc_gfx->push_draw(mod_ctx, g_drawType, &compositePayload, sizeof(compositePayload));
     }
 
     DEFINE_HOOK_SYMBOL("drawDepth2", void(view_class *, view_port_class *, int), DrawDepth2);
@@ -538,6 +647,13 @@ namespace
         add_control(panel, toggle);
 
         svc_ui->pane_add_section(mod_ctx, panel, "Look");
+        UiControlDesc halfResolutionToggle = UI_CONTROL_DESC_INIT;
+        halfResolutionToggle.kind = UI_CONTROL_TOGGLE;
+        halfResolutionToggle.label = "Half Resolution";
+        halfResolutionToggle.help_rml = "Render the DoF gather pass at half the scene resolution for better performance.";
+        halfResolutionToggle.binding = UI_BINDING_CONFIG_VAR;
+        halfResolutionToggle.config_var = g_cvarHalfResolution;
+        add_control(panel, halfResolutionToggle);
         add_number(panel, "Intensity", g_cvarIntensity, 0, 200, 5, "%",
                    "Overall multiplier on the DoF effect strength.");
         add_number(panel, "Max Blur", g_cvarMaxBlur, 1, 60, 1, " /1000 of height",
@@ -591,7 +707,8 @@ extern "C"
             (result = register_int_option("minFocusRange", 800, g_cvarMinFocusRange, error)) != MOD_OK ||
             (result = register_int_option("farFalloff", 200, g_cvarFarFalloff, error)) != MOD_OK ||
             (result = register_int_option("nearFalloff", 50, g_cvarNearFalloff, error)) != MOD_OK ||
-            (result = register_int_option("tapCount", 16, g_cvarTapCount, error)) != MOD_OK)
+            (result = register_int_option("tapCount", 16, g_cvarTapCount, error)) != MOD_OK ||
+            (result = register_bool_option("halfResolution", false, g_cvarHalfResolution, error)) != MOD_OK)
         {
             return result;
         }
