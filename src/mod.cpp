@@ -43,9 +43,9 @@ namespace
     // ---------------------------------------------------------------------------------------------
     // Config
     // ---------------------------------------------------------------------------------------------
-    ConfigVarHandle g_cvarEnabled = 0;
-    ConfigVarHandle g_cvarIntensity = 0; // % multiplier on the computed strength
-    ConfigVarHandle g_cvarAmbientEnabled = 0;
+    ConfigVarHandle g_cvarEnabled = 0;            // enable/disable the effect
+    ConfigVarHandle g_cvarIntensity = 0;          // % multiplier on the computed strength
+    ConfigVarHandle g_cvarAmbientEnabled = 0;     // enable ambient blur in the far field
     ConfigVarHandle g_cvarAmbientFarBlur = 0;     // % minimum strength in the far field, even when focus is weak
     ConfigVarHandle g_cvarAmbientFarDistance = 0; // world-space distance where ambient blur begins
     ConfigVarHandle g_cvarMaxBlur = 0;            // tenths of a percent of target height (10 = 1.0%)
@@ -61,9 +61,8 @@ namespace
     {
         int64_t value = fallback;
         if (handle == 0 || svc_config->get_int(mod_ctx, handle, &value) != MOD_OK)
-        {
             return fallback;
-        }
+
         return value;
     }
 
@@ -71,9 +70,8 @@ namespace
     {
         bool value = fallback;
         if (handle == 0 || svc_config->get_bool(mod_ctx, handle, &value) != MOD_OK)
-        {
             return fallback;
-        }
+
         return value;
     }
 
@@ -83,8 +81,7 @@ namespace
         desc.name = name;
         desc.type = CONFIG_VAR_BOOL;
         desc.default_bool = defaultValue;
-        if (svc_config->register_var(mod_ctx, &desc, &outHandle) != MOD_OK)
-        {
+        if (svc_config->register_var(mod_ctx, &desc, &outHandle) != MOD_OK) {
             return mods::set_error(error, MOD_ERROR, "failed to register depth of field option");
         }
         return MOD_OK;
@@ -97,8 +94,7 @@ namespace
         desc.name = name;
         desc.type = CONFIG_VAR_INT;
         desc.default_int = defaultValue;
-        if (svc_config->register_var(mod_ctx, &desc, &outHandle) != MOD_OK)
-        {
+        if (svc_config->register_var(mod_ctx, &desc, &outHandle) != MOD_OK) {
             return mods::set_error(error, MOD_ERROR, "failed to register depth of field option");
         }
         return MOD_OK;
@@ -156,13 +152,11 @@ namespace
 
     void release_pipeline()
     {
-        if (g_gatherPipeline != nullptr)
-        {
+        if (g_gatherPipeline != nullptr) {
             wgpuRenderPipelineRelease(g_gatherPipeline);
             g_gatherPipeline = nullptr;
         }
-        if (g_compositePipeline != nullptr)
-        {
+        if (g_compositePipeline != nullptr) {
             wgpuRenderPipelineRelease(g_compositePipeline);
             g_compositePipeline = nullptr;
         }
@@ -173,33 +167,27 @@ namespace
     void release_gpu()
     {
         release_pipeline();
-        if (g_sampler != nullptr)
-        {
+        if (g_sampler != nullptr) {
             wgpuSamplerRelease(g_sampler);
             g_sampler = nullptr;
         }
-        if (g_pipelineLayout != nullptr)
-        {
+        if (g_pipelineLayout != nullptr) {
             wgpuPipelineLayoutRelease(g_pipelineLayout);
             g_pipelineLayout = nullptr;
         }
-        if (g_compositePipelineLayout != nullptr)
-        {
+        if (g_compositePipelineLayout != nullptr) {
             wgpuPipelineLayoutRelease(g_compositePipelineLayout);
             g_compositePipelineLayout = nullptr;
         }
-        if (g_bgl != nullptr)
-        {
+        if (g_bgl != nullptr) {
             wgpuBindGroupLayoutRelease(g_bgl);
             g_bgl = nullptr;
         }
-        if (g_compositeBgl != nullptr)
-        {
+        if (g_compositeBgl != nullptr) {
             wgpuBindGroupLayoutRelease(g_compositeBgl);
             g_compositeBgl = nullptr;
         }
-        if (g_module != nullptr)
-        {
+        if (g_module != nullptr) {
             wgpuShaderModuleRelease(g_module);
             g_module = nullptr;
         }
@@ -216,57 +204,58 @@ namespace
         moduleDesc.label = {"dof_hq", WGPU_STRLEN};
         g_module = wgpuDeviceCreateShaderModule(device, &moduleDesc);
         if (g_module == nullptr)
-        {
             return false;
-        }
 
         // Explicit layout: the depth snapshot is R32Float, which must be bound as unfilterable.
         WGPUBindGroupLayoutEntry entries[4] = {WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
-                                               WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+                                               WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+                                               WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
                                                WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT};
         entries[0].binding = 0;
         entries[0].visibility = WGPUShaderStage_Fragment;
         entries[0].buffer.type = WGPUBufferBindingType_Uniform;
         entries[0].buffer.minBindingSize = sizeof(DofParams);
+
         entries[1].binding = 1;
         entries[1].visibility = WGPUShaderStage_Fragment;
         entries[1].texture.sampleType = WGPUTextureSampleType_Float;
         entries[1].texture.viewDimension = WGPUTextureViewDimension_2D;
+
         entries[2].binding = 2;
         entries[2].visibility = WGPUShaderStage_Fragment;
         entries[2].texture.sampleType = WGPUTextureSampleType_UnfilterableFloat;
         entries[2].texture.viewDimension = WGPUTextureViewDimension_2D;
+
         entries[3].binding = 3;
         entries[3].visibility = WGPUShaderStage_Fragment;
         entries[3].sampler.type = WGPUSamplerBindingType_Filtering;
+
         WGPUBindGroupLayoutDescriptor bglDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
         bglDesc.label = {"dof_hq bgl", WGPU_STRLEN};
         bglDesc.entryCount = 4;
         bglDesc.entries = entries;
         g_bgl = wgpuDeviceCreateBindGroupLayout(device, &bglDesc);
         if (g_bgl == nullptr)
-        {
             return false;
-        }
 
-        WGPUBindGroupLayoutEntry compositeEntries[2] = {
-            WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT, WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT};
+        WGPUBindGroupLayoutEntry compositeEntries[2] = {WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT,
+                                                        WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT};
         compositeEntries[0].binding = 1;
         compositeEntries[0].visibility = WGPUShaderStage_Fragment;
         compositeEntries[0].texture.sampleType = WGPUTextureSampleType_Float;
         compositeEntries[0].texture.viewDimension = WGPUTextureViewDimension_2D;
+
         compositeEntries[1].binding = 3;
         compositeEntries[1].visibility = WGPUShaderStage_Fragment;
         compositeEntries[1].sampler.type = WGPUSamplerBindingType_Filtering;
+
         WGPUBindGroupLayoutDescriptor compositeBglDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
         compositeBglDesc.label = {"dof_hq composite bgl", WGPU_STRLEN};
         compositeBglDesc.entryCount = 2;
         compositeBglDesc.entries = compositeEntries;
         g_compositeBgl = wgpuDeviceCreateBindGroupLayout(device, &compositeBglDesc);
         if (g_compositeBgl == nullptr)
-        {
             return false;
-        }
 
         WGPUPipelineLayoutDescriptor plDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
         plDesc.label = {"dof_hq pipeline layout", WGPU_STRLEN};
@@ -274,9 +263,7 @@ namespace
         plDesc.bindGroupLayouts = &g_bgl;
         g_pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &plDesc);
         if (g_pipelineLayout == nullptr)
-        {
             return false;
-        }
 
         WGPUPipelineLayoutDescriptor compositePlDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
         compositePlDesc.label = {"dof_hq composite pipeline layout", WGPU_STRLEN};
@@ -284,9 +271,7 @@ namespace
         compositePlDesc.bindGroupLayouts = &g_compositeBgl;
         g_compositePipelineLayout = wgpuDeviceCreatePipelineLayout(device, &compositePlDesc);
         if (g_compositePipelineLayout == nullptr)
-        {
             return false;
-        }
 
         WGPUSamplerDescriptor samplerDesc = WGPU_SAMPLER_DESCRIPTOR_INIT;
         samplerDesc.label = {"dof_hq sampler", WGPU_STRLEN};
@@ -307,13 +292,12 @@ namespace
                       .dstFactor = WGPUBlendFactor_One}, // keep destination alpha
         };
         WGPUColorTargetState colorTargets[GFX_MAX_COLOR_ATTACHMENTS];
-        const uint32_t colorTargetCount = gfx_init_color_target_states(&layout, colorTargets,
-                                                                       composite ? &blendState : nullptr,
-                                                                       static_cast<WGPUColorWriteMask>(
-                                                                           composite ? (WGPUColorWriteMask_Red |
-                                                                                        WGPUColorWriteMask_Green |
-                                                                                        WGPUColorWriteMask_Blue)
-                                                                                     : WGPUColorWriteMask_All));
+        const uint32_t colorTargetCount = gfx_init_color_target_states(
+            &layout, colorTargets, composite ? &blendState : nullptr,
+            static_cast<WGPUColorWriteMask>(
+                composite ? (WGPUColorWriteMask_Red | WGPUColorWriteMask_Green |
+                             WGPUColorWriteMask_Blue)
+                          : WGPUColorWriteMask_All));
 
         WGPUFragmentState fragment = WGPU_FRAGMENT_STATE_INIT;
         fragment.module = g_module;
@@ -345,18 +329,16 @@ namespace
         WGPURenderPipeline &pipeline = composite ? g_compositePipeline : g_gatherPipeline;
         GfxRenderTargetLayout &cachedLayout = composite ? g_sceneTargetLayout : g_gatherTargetLayout;
         if (pipeline != nullptr && cachedLayout.key == layout.key)
-        {
             return true;
-        }
-        if (pipeline != nullptr)
-        {
+
+        if (pipeline != nullptr) {
             wgpuRenderPipelineRelease(pipeline);
             pipeline = nullptr;
         }
+
         if (!build_pipeline(layout, composite, pipeline))
-        {
             return false;
-        }
+
         cachedLayout = layout;
         return true;
     }
@@ -366,9 +348,8 @@ namespace
         ModContext *, const GfxDrawContext *ctx, const void *payload, size_t payloadSize, void *)
     {
         if (payloadSize != sizeof(DrawPayload))
-        {
             return;
-        }
+
         DrawPayload data;
         std::memcpy(&data, payload, sizeof(data));
         if (data.color == nullptr || (!data.composite && data.depth == nullptr) ||
@@ -381,16 +362,14 @@ namespace
         WGPUBindGroupEntry entries[4] = {WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT,
                                          WGPU_BIND_GROUP_ENTRY_INIT, WGPU_BIND_GROUP_ENTRY_INIT};
         uint32_t entryCount = 0;
-        if (data.composite)
-        {
+        if (data.composite) {
             entries[0].binding = 1;
             entries[0].textureView = data.color;
             entries[1].binding = 3;
             entries[1].sampler = g_sampler;
             entryCount = 2;
         }
-        else
-        {
+        else {
             entries[0].binding = 0;
             entries[0].buffer = ctx->uniform_buffer;
             entries[0].offset = data.uniform_offset;
@@ -408,8 +387,7 @@ namespace
         bindGroupDesc.entryCount = entryCount;
         bindGroupDesc.entries = entries;
         WGPUBindGroup bindGroup = wgpuDeviceCreateBindGroup(ctx->device, &bindGroupDesc);
-        if (bindGroup == nullptr)
-        {
+        if (bindGroup == nullptr) {
             return;
         }
 
@@ -427,8 +405,7 @@ namespace
     {
         float focusDist = (view->lookat.center - view->lookat.eye).abs();
 
-        if (dCam_getBody()->Mode() == 4 || dCam_getBody()->Mode() == 7)
-        {
+        if (dCam_getBody()->Mode() == 4 || dCam_getBody()->Mode() == 7) {
             return focusDist;
         }
 
@@ -438,8 +415,7 @@ namespace
         float fovScale = 60.0f / (camProc != nullptr ? fopCamM_GetFovy(camProc) : 48.0f);
         dAttention_c *attention = dComIfGp_getAttention();
 
-        if (attention->LockonTruth())
-        {
+        if (attention->LockonTruth()) {
             fopAc_ac_c *atn_actor =
                 fopAcM_SearchByID(daPy_getLinkPlayerActorClass()->getAtnActorID());
             if (atn_actor != nullptr && camera_p != nullptr)
@@ -458,17 +434,12 @@ namespace
     static float normalize_dof_strength(float alpha, bool hasAttention)
     {
         float normalizedStrength = 0.0f; // [0, 1] for the effect strength
-        if (hasAttention)
-        {
-            // alpha is in [-254, 255], when lock-on target is close or far
-            normalizedStrength = (alpha + 254.0f) / 509.0f;
+        if (hasAttention) {
+            normalizedStrength = (alpha + 254.0f) / 509.0f; // alpha is in [-254, 255]
         }
-        else
-        {
-            // alpha is in [-255, -180]
-            normalizedStrength = (alpha + 255.0f) / 75.0f;
+        else {
+            normalizedStrength = (alpha + 255.0f) / 75.0f; // alpha is in [-255, -180]
         }
-
         return std::clamp(normalizedStrength, 0.0f, 1.0f);
     }
 
@@ -483,19 +454,13 @@ namespace
         const bool ambientEnabled = get_bool_option(g_cvarAmbientEnabled, true);
         const bool hasGameFocus = (alpha > -254.0f);
         if (!hasGameFocus && (!ambientEnabled || ambientFarBlur <= 0.0f))
-        {
             return false; // disable the effect (no gather pass)
-        }
 
         const float attentionPoint = g_env_light.mDemoAttentionPoint;
         const bool hasAttention = (0.0f != attentionPoint);
-        const float intensity =
-            static_cast<float>(std::clamp<int64_t>(get_int_option(g_cvarIntensity, 60), 0, 200)) /
-            100.0f;
-        const float focusStrength =
-            hasGameFocus ? normalize_dof_strength(alpha, hasAttention) * intensity : 0.0f;
-        const float ambientStrength =
-            (ambientEnabled && !hasAttention) ? ambientFarBlur * intensity : 0.0f;
+        const float intensity = static_cast<float>(std::clamp<int64_t>(get_int_option(g_cvarIntensity, 60), 0, 200)) / 100.0f;
+        const float focusStrength = hasGameFocus ? (normalize_dof_strength(alpha, hasAttention) * intensity) : 0.0f;
+        const float ambientStrength = (ambientEnabled && !hasAttention) ? (ambientFarBlur * intensity) : 0.0f;
         normalizedStrength = std::max(focusStrength, ambientStrength);
 
         // Skip the gather pass if the effect is very weak, to avoid unnecessary GPU work.
@@ -545,22 +510,17 @@ namespace
     void on_draw_depth2_post(ModContext *, void *args, void *, void *)
     {
         if (!get_bool_option(g_cvarEnabled, false) || daPy_getLinkPlayerActorClass() == nullptr)
-        {
             return;
-        }
+
         auto *view = mods::arg<view_class *>(args, 0);
         auto *port = mods::arg<view_port_class *>(args, 1);
         if (view == nullptr || port == nullptr)
-        {
             return;
-        }
 
         DofParams params{};
         float strength = 0.0f;
         if (!build_dof_params(view, port, params, strength))
-        {
             return;
-        }
 
         GfxResolveDesc resolveDesc = GFX_RESOLVE_DESC_INIT;
         resolveDesc.color = true;
@@ -568,21 +528,16 @@ namespace
         GfxResolvedTargets resolved = GFX_RESOLVED_TARGETS_INIT;
         if (svc_gfx->resolve_pass(mod_ctx, &resolveDesc, &resolved) != MOD_OK ||
             resolved.color == nullptr || resolved.depth == nullptr)
-        {
             return;
-        }
 
         const uint32_t divisor = get_bool_option(g_cvarHalfResolution, false) ? 2u : 1u;
         const uint32_t gatherWidth = std::max((resolved.width + divisor - 1u) / divisor, 1u);
         const uint32_t gatherHeight = std::max((resolved.height + divisor - 1u) / divisor, 1u);
         if (svc_gfx->create_pass(mod_ctx, gatherWidth, gatherHeight) != MOD_OK)
-        {
             return;
-        }
 
         GfxRange uniformRange{0, 0};
-        if (svc_gfx->push_uniform(mod_ctx, &params, sizeof(params), &uniformRange) != MOD_OK)
-        {
+        if (svc_gfx->push_uniform(mod_ctx, &params, sizeof(params), &uniformRange) != MOD_OK) {
             GfxResolveDesc closeDesc = GFX_RESOLVE_DESC_INIT;
             closeDesc.color = false;
             svc_gfx->resolve_pass(mod_ctx, &closeDesc, &resolved);
@@ -590,8 +545,7 @@ namespace
         }
         const DrawPayload gatherPayload{
             resolved.color, resolved.depth, uniformRange.offset, uniformRange.size, 0};
-        if (svc_gfx->push_draw(mod_ctx, g_drawType, &gatherPayload, sizeof(gatherPayload)) != MOD_OK)
-        {
+        if (svc_gfx->push_draw(mod_ctx, g_drawType, &gatherPayload, sizeof(gatherPayload)) != MOD_OK) {
             GfxResolveDesc closeDesc = GFX_RESOLVE_DESC_INIT;
             closeDesc.color = false;
             svc_gfx->resolve_pass(mod_ctx, &closeDesc, &resolved);
@@ -603,9 +557,7 @@ namespace
         GfxResolvedTargets gathered = GFX_RESOLVED_TARGETS_INIT;
         if (svc_gfx->resolve_pass(mod_ctx, &gatherResolveDesc, &gathered) != MOD_OK ||
             gathered.color == nullptr)
-        {
             return;
-        }
 
         const DrawPayload compositePayload{gathered.color, nullptr, 0, 0, 1};
         svc_gfx->push_draw(mod_ctx, g_drawType, &compositePayload, sizeof(compositePayload));
@@ -646,8 +598,7 @@ namespace
         add_control(pane, control);
     }
 
-    ModResult build_controls_tab(
-        ModContext *, UiWindowHandle, UiElementHandle left, UiElementHandle right, void *, ModError *)
+    ModResult build_controls_tab(ModContext *, UiWindowHandle, UiElementHandle left, UiElementHandle right, void *, ModError *)
     {
         (void)right;
 
@@ -694,9 +645,8 @@ namespace
     void on_open_controls(ModContext *, void *)
     {
         if (g_controlsWindow != 0)
-        {
             return;
-        }
+
         UiTabDesc tabs[1] = {UI_TAB_DESC_INIT};
         tabs[0].title = "Controls";
         tabs[0].build = build_controls_tab;
@@ -704,17 +654,14 @@ namespace
         desc.tabs = tabs;
         desc.tab_count = 1;
         desc.on_closed = on_controls_window_closed;
-        if (svc_ui->window_push(mod_ctx, &desc, &g_controlsWindow) != MOD_OK)
-        {
+        if (svc_ui->window_push(mod_ctx, &desc, &g_controlsWindow) != MOD_OK) {
             svc_log->error(mod_ctx, "failed to open depth of field controls window");
         }
     }
 
     ModResult build_panel(ModContext *, UiElementHandle panel, void *, ModError *)
     {
-        add_toggle(panel, "Enabled", g_cvarEnabled,
-                   "Enable the Depth of Field effect.");
-
+        add_toggle(panel, "Enabled", g_cvarEnabled, "Enable the Depth of Field effect.");
         UiControlDesc control = UI_CONTROL_DESC_INIT;
         control.kind = UI_CONTROL_BUTTON;
         control.label = "Open Controls";
@@ -732,9 +679,8 @@ extern "C"
     {
         ModResult result = register_bool_option("effectEnabled", true, g_cvarEnabled, error);
         if (result != MOD_OK)
-        {
             return result;
-        }
+
         if ((result = register_int_option("intensity", 60, g_cvarIntensity, error)) != MOD_OK ||
             (result = register_bool_option("ambientBlurEnabled", true, g_cvarAmbientEnabled, error)) != MOD_OK ||
             (result = register_int_option("ambientFarBlur", 20, g_cvarAmbientFarBlur, error)) != MOD_OK ||
@@ -751,33 +697,31 @@ extern "C"
         }
 
         result = svc_resource->load(mod_ctx, "dof_hq.wgsl", &g_shaderSource);
-        if (result != MOD_OK || g_shaderSource.data == nullptr)
-        {
+        if (result != MOD_OK || g_shaderSource.data == nullptr) {
             return mods::set_error(error, result, "failed to load dof_hq.wgsl");
         }
-        if (svc_gfx->get_device_info(mod_ctx, &g_deviceInfo) != MOD_OK)
-        {
+
+        if (svc_gfx->get_device_info(mod_ctx, &g_deviceInfo) != MOD_OK) {
             return mods::set_error(error, MOD_ERROR, "failed to query device info");
         }
-        if (!init_gpu())
-        {
+
+        if (!init_gpu()) {
             release_gpu();
             return mods::set_error(error, MOD_ERROR, "failed to create depth of field GPU resources");
         }
+
         // The shader module keeps its own copy of the source.
         svc_resource->free(mod_ctx, &g_shaderSource);
 
         GfxDrawTypeDesc drawDesc = GFX_DRAW_TYPE_DESC_INIT;
         drawDesc.label = "dof_hq";
         drawDesc.draw = on_draw;
-        if (svc_gfx->register_draw_type(mod_ctx, &drawDesc, &g_drawType) != MOD_OK)
-        {
+        if (svc_gfx->register_draw_type(mod_ctx, &drawDesc, &g_drawType) != MOD_OK) {
             release_gpu();
             return mods::set_error(error, MOD_ERROR, "failed to register draw type");
         }
 
-        if (mods::hook::add_post<DrawDepth2>(on_draw_depth2_post) != MOD_OK)
-        {
+        if (mods::hook::add_post<DrawDepth2>(on_draw_depth2_post) != MOD_OK) {
             release_gpu();
             return mods::set_error(error, MOD_UNAVAILABLE, "failed to hook drawDepth2");
         }
