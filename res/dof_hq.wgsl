@@ -10,10 +10,12 @@ struct P {
     farZ: f32,
     reversedZ: f32,
     nearBlur: f32,
-    tapCount: f32,
+    tapCount: f32,        // maximum number of taps; the actual count scales with the blur radius
     ambientFarDistance: f32,
     ambientStrength: f32,
-    _pad: array<f32, 3>,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
     rect: vec4<f32>,      // 3D viewport in 0..1 UV: x0, y0, x1, y1
 };
 @group(0) @binding(0) var<uniform> p: P;
@@ -53,10 +55,10 @@ fn cocFromZ(z: f32, maxR: f32) -> f32 {
     // A half-threshold ramp keeps the transition gradual while limiting the effect to distant objects.
     let ambientT = clamp((z - p.ambientFarDistance) / max(p.ambientFarDistance * 0.5, 1.0), 0.0, 1.0);
     let ambientCoc = ambientT * maxR * p.ambientStrength;
-    if (p.ambientStrength > 0.0 && z > p.ambientFarDistance) {
-        return ambientCoc;
-    }
-    return focusCoc;
+
+    // Whichever contributes the larger blur wins, so a strong focus blur is never reduced
+    // by the (weaker) ambient ramp in the far field.
+    return select(focusCoc, ambientCoc, abs(ambientCoc) > abs(focusCoc));
 }
 
 fn loadCoc(px: vec2<i32>, maxR: f32) -> f32 {
@@ -65,6 +67,9 @@ fn loadCoc(px: vec2<i32>, maxR: f32) -> f32 {
     return cocFromZ(linZ(d), maxR);
 }
 
+// Outputs PREMULTIPLIED color (rgb * a, a). With premultiplied alpha, bilinear filtering of the
+// half-resolution target is correct at mask edges (no dark fringes), and the blend state is
+// One / OneMinusSrcAlpha everywhere the result is blended over the scene.
 @fragment
 fn fs_main(v: VO) -> @location(0) vec4<f32> {
     if (v.uv.x < p.rect.x || v.uv.y < p.rect.y || v.uv.x > p.rect.z || v.uv.y > p.rect.w) {
@@ -90,7 +95,10 @@ fn fs_main(v: VO) -> @location(0) vec4<f32> {
     var wsum = 1.0;
     var c = cos(rot);
     var s = sin(rot);
-    let N = i32(clamp(p.tapCount, 8.0, 64.0));
+
+    // Adaptive tap count: small blurs need few samples, large blurs get the full budget.
+    let maxN = i32(clamp(p.tapCount, 4.0, 64.0));
+    let N = clamp(i32(ceil(r * 1.5)), 4, maxN);
     for (var i = 0; i < N; i++) {
         let rr = sqrt((f32(i) + 0.5) / f32(N));
         let o = vec2<f32>(c, s) * rr * r;
@@ -104,9 +112,11 @@ fn fs_main(v: VO) -> @location(0) vec4<f32> {
         s = c * SG + s * CG;
         c = nc;
     }
-    return vec4<f32>(acc / wsum, smoothstep(0.5, 2.0, r));
+    let a = smoothstep(0.5, 2.0, r);
+    return vec4<f32>((acc / wsum) * a, a);
 }
 
+// Half-resolution path: the gathered target already holds premultiplied color.
 @fragment
 fn fs_composite(v: VO) -> @location(0) vec4<f32> {
     return textureSampleLevel(colorTex, samp, v.uv, 0.0);
