@@ -642,10 +642,6 @@ extern "C"
     MOD_EXPORT ModResult mod_shutdown(ModError *)
     {
         release_gpu();
-        g_cvarEnabled = g_cvarIntensity = g_cvarAmbientEnabled = g_cvarAmbientFarBlur =
-            g_cvarAmbientFarDistance = g_cvarMaxBlur =
-                g_cvarFocusRange = g_cvarMinFocusRange = g_cvarFarFalloff = g_cvarNearFalloff = 0;
-        g_drawType = 0;
         return MOD_OK;
     }
 }
