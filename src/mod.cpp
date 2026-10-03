@@ -55,6 +55,7 @@ namespace
     ConfigVarHandle g_cvarNearFalloff = 0;        // % of focus distance
     ConfigVarHandle g_cvarTapCount = 0;           // number of taps in the gather pass
     ConfigVarHandle g_cvarHalfResolution = 0;     // run the gather pass at half resolution (faster, but blurrier)
+    UiWindowHandle g_controlsWindow = 0;
 
     int64_t get_int_option(ConfigVarHandle handle, int64_t fallback)
     {
@@ -645,40 +646,80 @@ namespace
         add_control(pane, control);
     }
 
+    ModResult build_controls_tab(
+        ModContext *, UiWindowHandle, UiElementHandle left, UiElementHandle right, void *, ModError *)
+    {
+        (void)right;
+
+        add_toggle(left, "Enabled", g_cvarEnabled,
+                   "Enable the Depth of Field effect.");
+
+        svc_ui->pane_add_section(mod_ctx, left, "Look");
+        add_number(left, "Intensity", g_cvarIntensity, 0, 200, 5, "%",
+                   "Overall multiplier on the DoF effect strength.");
+        add_number(left, "Max Blur", g_cvarMaxBlur, 1, 60, 1, " /1000 of height",
+                   "Blur radius at full defocus, as a fraction of screen height. 10 is about 11 px at 1080p.");
+
+        svc_ui->pane_add_section(mod_ctx, left, "Ambient Blur");
+        add_toggle(left, "Enabled", g_cvarAmbientEnabled,
+                   "Enable a subtle DoF blur effect on distant objects.");
+        add_number(left, "Ambient Blur Intensity", g_cvarAmbientFarBlur, 0, 100, 5, "%",
+                   "Intensity of the ambient DoF effect.");
+        add_number(left, "Ambient Blur Distance", g_cvarAmbientFarDistance, 0, 20000, 500, " units",
+                   "World-space units where ambient DoF begins.");
+
+        svc_ui->pane_add_section(mod_ctx, left, "Focus");
+        add_number(left, "Focus Range", g_cvarFocusRange, 0, 200, 5, "%",
+                   "Depth of the sharp zone, as a percentage of the focus distance.");
+        add_number(left, "Min Focus Range", g_cvarMinFocusRange, 0, 2000, 25, " units",
+                   "Floor for the sharp zone so close focus targets keep their own limbs sharp.");
+        add_number(left, "Far Falloff", g_cvarFarFalloff, 10, 1000, 10, "%",
+                   "Distance past the sharp zone to reach full blur (behind the focus).");
+        add_number(left, "Near Falloff", g_cvarNearFalloff, 10, 1000, 10, "%",
+                   "Same for in front of the focus; only used when near blur is active (some cutscenes).");
+
+        svc_ui->pane_add_section(mod_ctx, left, "Performance");
+        add_toggle(left, "Half Resolution", g_cvarHalfResolution,
+                   "Render the DoF gather pass at half the scene resolution for better performance.");
+        add_number(left, "Tap Count", g_cvarTapCount, 8, 64, 8, " taps",
+                   "Number of samples to use in the gather pass.");
+        return MOD_OK;
+    }
+
+    void on_controls_window_closed(ModContext *, UiWindowHandle, void *)
+    {
+        g_controlsWindow = 0;
+    }
+
+    void on_open_controls(ModContext *, void *)
+    {
+        if (g_controlsWindow != 0)
+        {
+            return;
+        }
+        UiTabDesc tabs[1] = {UI_TAB_DESC_INIT};
+        tabs[0].title = "Controls";
+        tabs[0].build = build_controls_tab;
+        UiWindowDesc desc = UI_WINDOW_DESC_INIT;
+        desc.tabs = tabs;
+        desc.tab_count = 1;
+        desc.on_closed = on_controls_window_closed;
+        if (svc_ui->window_push(mod_ctx, &desc, &g_controlsWindow) != MOD_OK)
+        {
+            svc_log->error(mod_ctx, "failed to open depth of field controls window");
+        }
+    }
+
     ModResult build_panel(ModContext *, UiElementHandle panel, void *, ModError *)
     {
         add_toggle(panel, "Enabled", g_cvarEnabled,
                    "Enable the Depth of Field effect.");
 
-        svc_ui->pane_add_section(mod_ctx, panel, "Look");
-        add_number(panel, "Intensity", g_cvarIntensity, 0, 200, 5, "%",
-                   "Overall multiplier on the DoF effect strength.");
-        add_number(panel, "Max Blur", g_cvarMaxBlur, 1, 60, 1, " /1000 of height",
-                   "Blur radius at full defocus, as a fraction of screen height. 10 is about 11 px at 1080p.");
-
-        svc_ui->pane_add_section(mod_ctx, panel, "Ambient Blur");
-        add_toggle(panel, "Enabled", g_cvarAmbientEnabled,
-                   "Enable a subtle DoF blur effect on distant objects.");
-        add_number(panel, "Ambient Blur Intensity", g_cvarAmbientFarBlur, 0, 100, 5, "%",
-                   "Intensity of the ambient DoF effect.");
-        add_number(panel, "Ambient Blur Distance", g_cvarAmbientFarDistance, 0, 20000, 500, " units",
-                   "World-space units where ambient DoF begins.");
-
-        svc_ui->pane_add_section(mod_ctx, panel, "Focus");
-        add_number(panel, "Focus Range", g_cvarFocusRange, 0, 200, 5, "%",
-                   "Depth of the sharp zone, as a percentage of the focus distance.");
-        add_number(panel, "Min Focus Range", g_cvarMinFocusRange, 0, 2000, 25, " units",
-                   "Floor for the sharp zone so close focus targets keep their own limbs sharp.");
-        add_number(panel, "Far Falloff", g_cvarFarFalloff, 10, 1000, 10, "%",
-                   "Distance past the sharp zone to reach full blur (behind the focus).");
-        add_number(panel, "Near Falloff", g_cvarNearFalloff, 10, 1000, 10, "%",
-                   "Same for in front of the focus; only used when near blur is active (some cutscenes).");
-
-        svc_ui->pane_add_section(mod_ctx, panel, "Performance");
-        add_toggle(panel, "Half Resolution", g_cvarHalfResolution,
-                   "Render the DoF gather pass at half the scene resolution for better performance.");
-        add_number(panel, "Tap Count", g_cvarTapCount, 8, 64, 8, " taps",
-                   "Number of samples to use in the gather pass.");
+        UiControlDesc control = UI_CONTROL_DESC_INIT;
+        control.kind = UI_CONTROL_BUTTON;
+        control.label = "Open Controls";
+        control.on_pressed = on_open_controls;
+        add_control(panel, control);
         return MOD_OK;
     }
 
