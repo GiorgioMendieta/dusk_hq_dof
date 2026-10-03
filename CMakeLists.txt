@@ -26,3 +26,7 @@ add_mod(dof_hq
         MOD_JSON "${CMAKE_CURRENT_BINARY_DIR}/mod.json"
         RES_DIR res
 )
+
+if (MSVC)
+    target_compile_options(dof_hq PRIVATE /Zc:__cplusplus)
+endif ()
