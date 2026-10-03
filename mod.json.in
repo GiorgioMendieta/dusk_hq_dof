@@ -1,0 +1,7 @@
+{
+  "id": "com.giorgiomendieta.dof_hq",
+  "name": "HQ Depth of Field",
+  "version": "1.0.0",
+  "author": "Giorgio Mendieta",
+  "description": "Replaces the built-in depth of field for a high-quality effect, optionally blurring objects in the distance during normal gameplay. Set the built-in depth of field option to Off while this mod is enabled."
+}
