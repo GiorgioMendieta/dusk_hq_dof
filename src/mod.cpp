@@ -431,7 +431,7 @@ namespace
         return focusDist;
     }
 
-    static float normalize_dof_strength(float alpha, bool hasAttention)
+    float normalize_dof_strength(float alpha, bool hasAttention)
     {
         float normalizedStrength = 0.0f; // [0, 1] for the effect strength
         if (hasAttention) {
@@ -443,7 +443,7 @@ namespace
         return std::clamp(normalizedStrength, 0.0f, 1.0f);
     }
 
-    static bool build_dof_params(const view_class *view, const view_port_class *port, DofParams &params, float &normalizedStrength)
+    bool build_dof_params(const view_class *view, const view_port_class *port, DofParams &params, float &normalizedStrength)
     {
         // Same final value drawDepth2 computes for l_tevColor0.a.
         float alpha = g_env_light.field_0x1264;
@@ -484,7 +484,6 @@ namespace
         const float tapCount =
             static_cast<float>(std::clamp<int64_t>(get_int_option(g_cvarTapCount, 16), 8, 64));
 
-        params = {};
         params.maxRadiusFrac = maxBlurFrac * zoom;
         params.strength = focusStrength;
         params.focusDist = focusDist;
@@ -509,7 +508,7 @@ namespace
     // Runs after the original drawDepth2 (which has already updated g_env_light.field_0x1264).
     void on_draw_depth2_post(ModContext *, void *args, void *, void *)
     {
-        if (!get_bool_option(g_cvarEnabled, false) || daPy_getLinkPlayerActorClass() == nullptr)
+        if (!get_bool_option(g_cvarEnabled, true) || daPy_getLinkPlayerActorClass() == nullptr)
             return;
 
         auto *view = mods::arg<view_class *>(args, 0);
@@ -631,7 +630,7 @@ namespace
 
         svc_ui->pane_add_section(mod_ctx, left, "Performance");
         add_toggle(left, "Half Resolution", g_cvarHalfResolution,
-                   "Render the DoF gather pass at half the scene resolution for better performance.");
+                   "Render the DoF gather pass at half the scene resolution for better performance. This may introduce some blur artifacts.");
         add_number(left, "Tap Count", g_cvarTapCount, 8, 64, 8, " taps",
                    "Number of samples to use in the gather pass.");
         return MOD_OK;
@@ -682,16 +681,16 @@ extern "C"
             return result;
 
         if ((result = register_int_option("intensity", 60, g_cvarIntensity, error)) != MOD_OK ||
+            (result = register_int_option("maxBlur", 10, g_cvarMaxBlur, error)) != MOD_OK ||
             (result = register_bool_option("ambientBlurEnabled", true, g_cvarAmbientEnabled, error)) != MOD_OK ||
             (result = register_int_option("ambientFarBlur", 20, g_cvarAmbientFarBlur, error)) != MOD_OK ||
             (result = register_int_option("ambientFarDistance", 8000, g_cvarAmbientFarDistance, error)) != MOD_OK ||
-            (result = register_int_option("maxBlur", 10, g_cvarMaxBlur, error)) != MOD_OK ||
             (result = register_int_option("focusRange", 40, g_cvarFocusRange, error)) != MOD_OK ||
             (result = register_int_option("minFocusRange", 800, g_cvarMinFocusRange, error)) != MOD_OK ||
             (result = register_int_option("farFalloff", 200, g_cvarFarFalloff, error)) != MOD_OK ||
             (result = register_int_option("nearFalloff", 50, g_cvarNearFalloff, error)) != MOD_OK ||
-            (result = register_int_option("tapCount", 16, g_cvarTapCount, error)) != MOD_OK ||
-            (result = register_bool_option("halfResolution", false, g_cvarHalfResolution, error)) != MOD_OK)
+            (result = register_bool_option("halfResolution", false, g_cvarHalfResolution, error)) != MOD_OK ||
+            (result = register_int_option("tapCount", 16, g_cvarTapCount, error)) != MOD_OK)
         {
             return result;
         }
@@ -707,6 +706,7 @@ extern "C"
 
         if (!init_gpu()) {
             release_gpu();
+            svc_resource->free(mod_ctx, &g_shaderSource);
             return mods::set_error(error, MOD_ERROR, "failed to create depth of field GPU resources");
         }
 
@@ -718,11 +718,13 @@ extern "C"
         drawDesc.draw = on_draw;
         if (svc_gfx->register_draw_type(mod_ctx, &drawDesc, &g_drawType) != MOD_OK) {
             release_gpu();
+            svc_resource->free(mod_ctx, &g_shaderSource);
             return mods::set_error(error, MOD_ERROR, "failed to register draw type");
         }
 
         if (mods::hook::add_post<DrawDepth2>(on_draw_depth2_post) != MOD_OK) {
             release_gpu();
+            svc_resource->free(mod_ctx, &g_shaderSource);
             return mods::set_error(error, MOD_UNAVAILABLE, "failed to hook drawDepth2");
         }
 
@@ -740,6 +742,7 @@ extern "C"
     MOD_EXPORT ModResult mod_shutdown(ModError *)
     {
         release_gpu();
+        svc_resource->free(mod_ctx, &g_shaderSource);
         return MOD_OK;
     }
 }
