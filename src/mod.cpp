@@ -615,8 +615,7 @@ namespace
     // ---------------------------------------------------------------------------------------------
     // UI
     // ---------------------------------------------------------------------------------------------
-    void add_control(UiElementHandle pane, const UiControlDesc &desc)
-    {
+    void add_control(UiElementHandle pane, const UiControlDesc &desc) {
         svc_ui->pane_add_control(mod_ctx, pane, &desc, nullptr);
     }
 
@@ -636,37 +635,30 @@ namespace
         add_control(pane, control);
     }
 
+    void add_toggle(UiElementHandle pane, const char* label, ConfigVarHandle cvar, const char* help) {
+        UiControlDesc control = UI_CONTROL_DESC_INIT;
+        control.kind = UI_CONTROL_TOGGLE;
+        control.label = label;
+        control.help_rml = help;
+        control.binding = UI_BINDING_CONFIG_VAR;
+        control.config_var = cvar;
+        add_control(pane, control);
+    }
+
     ModResult build_panel(ModContext *, UiElementHandle panel, void *, ModError *)
     {
-        UiControlDesc toggle = UI_CONTROL_DESC_INIT;
-        toggle.kind = UI_CONTROL_TOGGLE;
-        toggle.label = "Enabled";
-        toggle.help_rml = "Set the built-in depth of field option to Off while this is enabled.";
-        toggle.binding = UI_BINDING_CONFIG_VAR;
-        toggle.config_var = g_cvarEnabled;
-        add_control(panel, toggle);
+        add_toggle(panel, "Enabled", g_cvarEnabled,
+                   "Enable the Depth of Field effect.");
 
         svc_ui->pane_add_section(mod_ctx, panel, "Look");
-        UiControlDesc halfResolutionToggle = UI_CONTROL_DESC_INIT;
-        halfResolutionToggle.kind = UI_CONTROL_TOGGLE;
-        halfResolutionToggle.label = "Half Resolution";
-        halfResolutionToggle.help_rml = "Render the DoF gather pass at half the scene resolution for better performance.";
-        halfResolutionToggle.binding = UI_BINDING_CONFIG_VAR;
-        halfResolutionToggle.config_var = g_cvarHalfResolution;
-        add_control(panel, halfResolutionToggle);
         add_number(panel, "Intensity", g_cvarIntensity, 0, 200, 5, "%",
                    "Overall multiplier on the DoF effect strength.");
         add_number(panel, "Max Blur", g_cvarMaxBlur, 1, 60, 1, " /1000 of height",
                    "Blur radius at full defocus, as a fraction of screen height. 10 is about 11 px at 1080p.");
 
         svc_ui->pane_add_section(mod_ctx, panel, "Ambient Blur");
-        UiControlDesc ambientToggle = UI_CONTROL_DESC_INIT;
-        ambientToggle.kind = UI_CONTROL_TOGGLE;
-        ambientToggle.label = "Enabled";
-        ambientToggle.help_rml = "Enable a subtle DoF blur effect on distant objects.";
-        ambientToggle.binding = UI_BINDING_CONFIG_VAR;
-        ambientToggle.config_var = g_cvarAmbientEnabled;
-        add_control(panel, ambientToggle);
+        add_toggle(panel, "Enabled", g_cvarAmbientEnabled,
+                   "Enable a subtle DoF blur effect on distant objects.");
         add_number(panel, "Ambient Blur Intensity", g_cvarAmbientFarBlur, 0, 100, 5, "%",
                    "Intensity of the ambient DoF effect.");
         add_number(panel, "Ambient Blur Distance", g_cvarAmbientFarDistance, 0, 20000, 500, " units",
@@ -681,6 +673,10 @@ namespace
                    "Distance past the sharp zone to reach full blur (behind the focus).");
         add_number(panel, "Near Falloff", g_cvarNearFalloff, 10, 1000, 10, "%",
                    "Same for in front of the focus; only used when near blur is active (some cutscenes).");
+
+        svc_ui->pane_add_section(mod_ctx, panel, "Performance");
+        add_toggle(panel, "Half Resolution", g_cvarHalfResolution,
+                   "Render the DoF gather pass at half the scene resolution for better performance.");
         add_number(panel, "Tap Count", g_cvarTapCount, 8, 64, 8, " taps",
                    "Number of samples to use in the gather pass.");
         return MOD_OK;
