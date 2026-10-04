@@ -53,7 +53,6 @@ namespace
     ConfigVarHandle g_cvarAmbientFarBlur = 0;     // % strength of the ambient blur
     ConfigVarHandle g_cvarAmbientFarDistance = 0; // world-space distance where ambient blur begins
     ConfigVarHandle g_cvarMaxBlur = 0;            // thousandths of the target height (10 = 1.0%)
-    ConfigVarHandle g_cvarFocusRange = 0;         // % of focus distance
     ConfigVarHandle g_cvarMinFocusRange = 0;      // world units
     ConfigVarHandle g_cvarFarFalloff = 0;         // % of focus distance
     ConfigVarHandle g_cvarNearFalloff = 0;        // % of focus distance
@@ -67,10 +66,9 @@ namespace
     constexpr int64_t kDefMaxBlur = 10;
     constexpr bool kDefAmbientEnabled = true;
     constexpr int64_t kDefAmbientFarBlur = 20;
-    constexpr int64_t kDefAmbientFarDistance = 8000;
-    constexpr int64_t kDefFocusRange = 40;
-    constexpr int64_t kDefMinFocusRange = 800; // 1300
-    constexpr int64_t kDefFarFalloff = 200; // 500
+    constexpr int64_t kDefAmbientFarDistance = 9000;
+    constexpr int64_t kDefMinFocusRange = 1000;
+    constexpr int64_t kDefFarFalloff = 500;
     constexpr int64_t kDefNearFalloff = 50;
     constexpr bool kDefHalfResolution = true;
     constexpr int64_t kDefTapCount = 16;
@@ -104,7 +102,6 @@ namespace
         float ambientFarBlur = 0.0f;
         float ambientFarDistance = 0.0f;
         float maxBlurFrac = 0.0f;
-        float focusPct = 0.0f;
         float minRange = 0.0f;
         float farPct = 0.0f;
         float nearPct = 0.0f;
@@ -128,7 +125,6 @@ namespace
         s.maxBlurFrac = static_cast<float>(
                             std::clamp<int64_t>(get_int_option(g_cvarMaxBlur, kDefMaxBlur), 1, 60)) /
                         1000.0f;
-        s.focusPct = pct(g_cvarFocusRange, kDefFocusRange, 0, 200);
         s.minRange = static_cast<float>(
             std::clamp<int64_t>(get_int_option(g_cvarMinFocusRange, kDefMinFocusRange), 0, 2000));
         s.farPct = pct(g_cvarFarFalloff, kDefFarFalloff, 10, 1000);
@@ -586,7 +582,7 @@ namespace
         params.maxRadiusFrac = s.maxBlurFrac * zoom;
         params.strength = focusStrength;
         params.focusDist = focusDist;
-        params.focusRange = std::max(focusDist * s.focusPct, s.minRange);
+        params.focusRange = s.minRange;
         params.farFalloff = focusDist * s.farPct;
         params.nearFalloff = focusDist * s.nearPct;
         params.nearZ = view->near_;
@@ -724,20 +720,18 @@ namespace
 
         svc_ui->pane_add_section(mod_ctx, left, "Ambient Blur");
         add_toggle(left, "Ambient Blur", g_cvarAmbientEnabled,
-                   "Enable a subtle DoF blur effect on distant objects.");
+                   "Enable a subtle DoF blur effect on distant objects during normal gameplay.");
         add_number(left, "Ambient Blur Intensity", g_cvarAmbientFarBlur, 0, 100, 5, "%",
                    "Intensity of the ambient DoF effect.");
         add_number(left, "Ambient Blur Distance", g_cvarAmbientFarDistance, 0, 20000, 500, " units",
                    "World-space units where ambient DoF begins.");
 
         svc_ui->pane_add_section(mod_ctx, left, "Focus");
-        add_number(left, "Focus Range", g_cvarFocusRange, 0, 200, 5, "%",
-                   "Depth of the sharp zone, as a percentage of the focus distance.");
-        add_number(left, "Min Focus Range", g_cvarMinFocusRange, 0, 2000, 25, " units",
-                   "Minimum range that keeps nearby targets in focus.");
-        add_number(left, "Far Falloff", g_cvarFarFalloff, 10, 1000, 10, "%",
+        add_number(left, "Focus Range", g_cvarMinFocusRange, 0, 2000, 25, " units",
+               "World-space radius of the sharp zone around the focus distance.");
+        add_number(left, "Far Falloff", g_cvarFarFalloff, 25, 1000, 25, "%",
                    "Controls how quickly distant objects transition from sharp to fully blurred.");
-        add_number(left, "Near Falloff", g_cvarNearFalloff, 10, 1000, 10, "%",
+        add_number(left, "Near Falloff", g_cvarNearFalloff, 25, 1000, 25, "%",
                    "Same for in front of the focus; only used when near blur is active (during some cutscenes).");
 
         svc_ui->pane_add_section(mod_ctx, left, "Performance");
@@ -806,7 +800,6 @@ extern "C"
             (result = register_bool_option("ambientBlurEnabled", kDefAmbientEnabled, g_cvarAmbientEnabled, error)) != MOD_OK ||
             (result = register_int_option("ambientFarBlur", kDefAmbientFarBlur, g_cvarAmbientFarBlur, error)) != MOD_OK ||
             (result = register_int_option("ambientFarDistance", kDefAmbientFarDistance, g_cvarAmbientFarDistance, error)) != MOD_OK ||
-            (result = register_int_option("focusRange", kDefFocusRange, g_cvarFocusRange, error)) != MOD_OK ||
             (result = register_int_option("minFocusRange", kDefMinFocusRange, g_cvarMinFocusRange, error)) != MOD_OK ||
             (result = register_int_option("farFalloff", kDefFarFalloff, g_cvarFarFalloff, error)) != MOD_OK ||
             (result = register_int_option("nearFalloff", kDefNearFalloff, g_cvarNearFalloff, error)) != MOD_OK ||
