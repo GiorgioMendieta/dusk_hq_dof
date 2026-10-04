@@ -69,10 +69,10 @@ namespace
     constexpr int64_t kDefAmbientFarBlur = 20;
     constexpr int64_t kDefAmbientFarDistance = 8000;
     constexpr int64_t kDefFocusRange = 40;
-    constexpr int64_t kDefMinFocusRange = 800;
-    constexpr int64_t kDefFarFalloff = 200;
+    constexpr int64_t kDefMinFocusRange = 800; // 1300
+    constexpr int64_t kDefFarFalloff = 200; // 500
     constexpr int64_t kDefNearFalloff = 50;
-    constexpr bool kDefHalfResolution = false;
+    constexpr bool kDefHalfResolution = true;
     constexpr int64_t kDefTapCount = 16;
 
     int64_t get_int_option(ConfigVarHandle handle, int64_t fallback)
@@ -714,14 +714,13 @@ namespace
     {
         (void)right;
 
+        svc_ui->pane_add_section(mod_ctx, left, "Effect");
         add_toggle(left, "Enabled", g_cvarEnabled,
-                   "Enable the Depth of Field effect.");
-
-        svc_ui->pane_add_section(mod_ctx, left, "Look");
+                   "Enable the Depth of Field effect. Note: Set the built-in depth of field to Off while this mod is enabled (Settings > Video > Post-processing > Depth of Field).");
         add_number(left, "Intensity", g_cvarIntensity, 0, 200, 5, "%",
                    "Overall multiplier on the DoF effect strength.");
         add_number(left, "Max Blur", g_cvarMaxBlur, 1, 60, 1, " /1000 of height",
-                   "Blur radius at full defocus, as a fraction of screen height. 10 is about 11 px at 1080p.");
+                   "Blur radius at full defocus, as a fraction of screen height. 10 is about 11 px at 1080p, or 21 px at 4K.");
 
         svc_ui->pane_add_section(mod_ctx, left, "Ambient Blur");
         add_toggle(left, "Ambient Blur", g_cvarAmbientEnabled,
@@ -735,17 +734,17 @@ namespace
         add_number(left, "Focus Range", g_cvarFocusRange, 0, 200, 5, "%",
                    "Depth of the sharp zone, as a percentage of the focus distance.");
         add_number(left, "Min Focus Range", g_cvarMinFocusRange, 0, 2000, 25, " units",
-                   "Floor for the sharp zone so close focus targets keep their own limbs sharp.");
+                   "Minimum range that keeps nearby targets in focus.");
         add_number(left, "Far Falloff", g_cvarFarFalloff, 10, 1000, 10, "%",
-                   "Distance past the sharp zone to reach full blur (behind the focus).");
+                   "Controls how quickly distant objects transition from sharp to fully blurred.");
         add_number(left, "Near Falloff", g_cvarNearFalloff, 10, 1000, 10, "%",
-                   "Same for in front of the focus; only used when near blur is active (some cutscenes).");
+                   "Same for in front of the focus; only used when near blur is active (during some cutscenes).");
 
         svc_ui->pane_add_section(mod_ctx, left, "Performance");
         add_toggle(left, "Half Resolution", g_cvarHalfResolution,
                    "Render the DoF gather pass at half the scene resolution for better performance. This may introduce some blur artifacts.");
         add_number(left, "Max Tap Count", g_cvarTapCount, 8, 64, 8, " taps",
-                   "Maximum number of samples in the gather pass. Small blurs automatically use fewer.");
+                   "Maximum number of samples in the gather pass. Small blurs automatically use fewer samples.");
         return MOD_OK;
     }
 
@@ -773,13 +772,17 @@ namespace
 
     ModResult build_panel(ModContext *, UiElementHandle panel, void *, ModError *)
     {
-        add_toggle(panel, "Enabled", g_cvarEnabled, "Enable the Depth of Field effect.");
-        UiControlDesc control = UI_CONTROL_DESC_INIT;
-        control.kind = UI_CONTROL_BUTTON;
-        control.label = "Open Controls";
-        control.on_pressed = on_open_controls;
-        add_control(panel, control);
-        return MOD_OK;
+      add_toggle(
+          panel, "Enabled", g_cvarEnabled,
+          "Enable the Depth of Field effect. Note: Set the built-in "
+          "depth of field to Off while this mod is enabled (Settings > "
+          "Video > Post-processing > Depth of Field).");
+      UiControlDesc control = UI_CONTROL_DESC_INIT;
+      control.kind = UI_CONTROL_BUTTON;
+      control.label = "Open Controls";
+      control.on_pressed = on_open_controls;
+      add_control(panel, control);
+      return MOD_OK;
     }
 
     ModResult fail_init(ModError *error, ModResult code, const char *message)
