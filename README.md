@@ -1,5 +1,9 @@
 # Dusklight Mod Template
 
+<p align="center">
+  <img src="res/icon.png" alt="Dusklight Mod Template icon" width="220" />
+</p>
+
 A standalone template for [Dusklight](https://github.com/TwilitRealm/dusklight) mods.
 
 See the [Dusklight modding documentation](https://github.com/TwilitRealm/dusklight/blob/main/docs/modding.md)
