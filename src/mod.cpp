@@ -1,11 +1,4 @@
-// High quality depth of field mod.
-//
-// Lets the game's drawDepth2 run (with the built-in depth of field set to Off, it updates the
-// smoothed focus state in g_env_light and returns), then in a post-hook recomputes the focus
-// parameters, snapshots color + depth, and records a gather pass (res/dof_hq.wgsl).
-//
-// Full resolution: the gather is drawn straight onto the scene with premultiplied blending.
-// Half resolution: the gather is drawn into an offscreen target, then upsampled onto the scene.
+// Cinematic depth of field mod
 
 #include "global.h"
 
@@ -200,7 +193,7 @@ namespace
     PipelineSlot g_slotOffscreen = {nullptr, GFX_RENDER_TARGET_LAYOUT_INIT};
     PipelineSlot g_slotComposite = {nullptr, GFX_RENDER_TARGET_LAYOUT_INIT};
 
-    // Mirror of the WGSL struct P (keep in sync with res/dof_hq.wgsl).
+    // Mirror of the WGSL struct P (keep in sync with res/depth_of_field.wgsl).
     struct DofParams
     {
         float maxRadiusFrac;
@@ -295,7 +288,7 @@ namespace
         wgsl.code = {static_cast<const char *>(g_shaderSource.data), g_shaderSource.size};
         WGPUShaderModuleDescriptor moduleDesc = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
         moduleDesc.nextInChain = &wgsl.chain;
-        moduleDesc.label = {"dof_hq", WGPU_STRLEN};
+        moduleDesc.label = {"depth_of_field", WGPU_STRLEN};
         g_module = wgpuDeviceCreateShaderModule(device, &moduleDesc);
         if (g_module == nullptr)
             return false;
@@ -325,7 +318,7 @@ namespace
         entries[3].sampler.type = WGPUSamplerBindingType_Filtering;
 
         WGPUBindGroupLayoutDescriptor bglDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
-        bglDesc.label = {"dof_hq bgl", WGPU_STRLEN};
+        bglDesc.label = {"depth_of_field bgl", WGPU_STRLEN};
         bglDesc.entryCount = 4;
         bglDesc.entries = entries;
         g_bgl = wgpuDeviceCreateBindGroupLayout(device, &bglDesc);
@@ -344,7 +337,7 @@ namespace
         compositeEntries[1].sampler.type = WGPUSamplerBindingType_Filtering;
 
         WGPUBindGroupLayoutDescriptor compositeBglDesc = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
-        compositeBglDesc.label = {"dof_hq composite bgl", WGPU_STRLEN};
+        compositeBglDesc.label = {"depth_of_field composite bgl", WGPU_STRLEN};
         compositeBglDesc.entryCount = 2;
         compositeBglDesc.entries = compositeEntries;
         g_compositeBgl = wgpuDeviceCreateBindGroupLayout(device, &compositeBglDesc);
@@ -352,7 +345,7 @@ namespace
             return false;
 
         WGPUPipelineLayoutDescriptor plDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
-        plDesc.label = {"dof_hq pipeline layout", WGPU_STRLEN};
+        plDesc.label = {"depth_of_field pipeline layout", WGPU_STRLEN};
         plDesc.bindGroupLayoutCount = 1;
         plDesc.bindGroupLayouts = &g_bgl;
         g_pipelineLayout = wgpuDeviceCreatePipelineLayout(device, &plDesc);
@@ -360,7 +353,7 @@ namespace
             return false;
 
         WGPUPipelineLayoutDescriptor compositePlDesc = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
-        compositePlDesc.label = {"dof_hq composite pipeline layout", WGPU_STRLEN};
+        compositePlDesc.label = {"depth_of_field composite pipeline layout", WGPU_STRLEN};
         compositePlDesc.bindGroupLayoutCount = 1;
         compositePlDesc.bindGroupLayouts = &g_compositeBgl;
         g_compositePipelineLayout = wgpuDeviceCreatePipelineLayout(device, &compositePlDesc);
@@ -368,7 +361,7 @@ namespace
             return false;
 
         WGPUSamplerDescriptor samplerDesc = WGPU_SAMPLER_DESCRIPTOR_INIT;
-        samplerDesc.label = {"dof_hq sampler", WGPU_STRLEN};
+        samplerDesc.label = {"depth_of_field sampler", WGPU_STRLEN};
         samplerDesc.magFilter = WGPUFilterMode_Linear;
         samplerDesc.minFilter = WGPUFilterMode_Linear;
         g_sampler = wgpuDeviceCreateSampler(device, &samplerDesc);
@@ -408,7 +401,7 @@ namespace
         depthStencil.depthCompare = WGPUCompareFunction_Always;
 
         WGPURenderPipelineDescriptor pipelineDesc = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
-        pipelineDesc.label = {composite ? "dof_hq composite" : (offscreen ? "dof_hq gather (offscreen)" : "dof_hq gather"),
+        pipelineDesc.label = {composite ? "depth_of_field composite" : (offscreen ? "depth_of_field gather (offscreen)" : "depth_of_field gather"),
                               WGPU_STRLEN};
         pipelineDesc.layout = composite ? g_compositePipelineLayout : g_pipelineLayout;
         pipelineDesc.vertex.module = g_module;
@@ -810,9 +803,9 @@ extern "C"
         }
         refresh_settings();
 
-        result = svc_resource->load(mod_ctx, "dof_hq.wgsl", &g_shaderSource);
+        result = svc_resource->load(mod_ctx, "depth_of_field.wgsl", &g_shaderSource);
         if (result != MOD_OK || g_shaderSource.data == nullptr)
-            return mods::set_error(error, result, "failed to load dof_hq.wgsl");
+            return mods::set_error(error, result, "failed to load depth_of_field.wgsl");
 
         if (svc_gfx->get_device_info(mod_ctx, &g_deviceInfo) != MOD_OK)
             return fail_init(error, MOD_ERROR, "failed to query device info");
@@ -824,17 +817,17 @@ extern "C"
         free_shader_source();
 
         GfxDrawTypeDesc drawDesc = GFX_DRAW_TYPE_DESC_INIT;
-        drawDesc.label = "dof_hq gather";
+        drawDesc.label = "depth_of_field gather";
         drawDesc.draw = on_draw_gather_direct;
         if (svc_gfx->register_draw_type(mod_ctx, &drawDesc, &g_drawGatherDirect) != MOD_OK)
             return fail_init(error, MOD_ERROR, "failed to register draw type");
 
-        drawDesc.label = "dof_hq gather (offscreen)";
+        drawDesc.label = "depth_of_field gather (offscreen)";
         drawDesc.draw = on_draw_gather_offscreen;
         if (svc_gfx->register_draw_type(mod_ctx, &drawDesc, &g_drawGatherOffscreen) != MOD_OK)
             return fail_init(error, MOD_ERROR, "failed to register draw type");
 
-        drawDesc.label = "dof_hq composite";
+        drawDesc.label = "depth_of_field composite";
         drawDesc.draw = on_draw_composite;
         if (svc_gfx->register_draw_type(mod_ctx, &drawDesc, &g_drawComposite) != MOD_OK)
             return fail_init(error, MOD_ERROR, "failed to register draw type");

@@ -20,7 +20,7 @@ add_subdirectory("${DUSKLIGHT_DIR}/sdk" dusklight-sdk EXCLUDE_FROM_ALL)
 
 configure_file(mod.json.in "${CMAKE_CURRENT_BINARY_DIR}/mod.json" @ONLY NEWLINE_STYLE LF)
 
-add_mod(dof_hq
+add_mod(depth_of_field
         FEATURES game webgpu
         SOURCES src/mod.cpp
         MOD_JSON "${CMAKE_CURRENT_BINARY_DIR}/mod.json"
@@ -28,5 +28,5 @@ add_mod(dof_hq
 )
 
 if (MSVC)
-    target_compile_options(dof_hq PRIVATE /Zc:__cplusplus)
+    target_compile_options(depth_of_field PRIVATE /Zc:__cplusplus)
 endif ()
