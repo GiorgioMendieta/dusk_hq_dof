@@ -663,7 +663,61 @@ namespace
         svc_gfx->push_draw(mod_ctx, g_drawComposite, &compositePayload, sizeof(compositePayload));
     }
 
-    HookAction on_draw_depth2_pre(ModContext *, void *, void *, void *)
+    void capture_depth2_targets(view_port_class *port)
+    {
+        s16 xOrig = static_cast<int>(port->x_orig) & ~7;
+        s16 yOrig = static_cast<int>(port->y_orig) & ~7;
+        s16 yOrigPos = yOrig < 0 ? 0 : yOrig;
+        s16 width = static_cast<int>(port->width) & ~7;
+        s16 height = static_cast<int>(port->height) & ~7;
+
+        void *zBufferTex = mDoGph_gInf_c::getZbufferTex();
+        void *frameBufferTex = mDoGph_gInf_c::getFrameBufferTex();
+        if (yOrig < 0) {
+            height += yOrig;
+            yOrig = -yOrig >> 1;
+            zBufferTex =
+                static_cast<char *>(zBufferTex) + GXGetTexBufferSize(
+                    FB_WIDTH / 2, yOrig, GX_TF_IA8, GX_FALSE, 0);
+            frameBufferTex =
+                static_cast<char *>(frameBufferTex) + GXGetTexBufferSize(
+                    FB_WIDTH / 2, yOrig, mDoGph_gInf_c::getFrameBufferTimg()->format, GX_FALSE, 0);
+        }
+
+        u16 halfWidth = width >> 1;
+        u16 halfHeight = height >> 1;
+        GXRenderModeObj *renderMode = JUTGetVideoManager()->getRenderMode();
+        GXSetCopyFilter(GX_FALSE, NULL, GX_TRUE, renderMode->vfilter);
+
+        GXSetTexCopySrc(xOrig, yOrigPos, width, height);
+        GXSetTexCopyDst(halfWidth, halfHeight, GX_TF_Z16, GX_TRUE);
+        GXCopyTex(zBufferTex, GX_FALSE);
+
+        GXSetTexCopySrc(xOrig, yOrigPos, width, height);
+        GXSetTexCopyDst(halfWidth, halfHeight,
+                        static_cast<GXTexFmt>(mDoGph_gInf_c::getFrameBufferTimg()->format), GX_TRUE);
+        GXCopyTex(frameBufferTex, GX_FALSE);
+
+#if TARGET_PC
+        mDoGph_gInf_c::getFrameBufferTexObj()->reset();
+        mDoGph_gInf_c::getZbufferTexObj()->reset();
+#endif
+        GXInitTexObj(mDoGph_gInf_c::getZbufferTexObj(), zBufferTex, halfWidth, halfHeight,
+                     GX_TF_IA8, GX_CLAMP, GX_CLAMP, GX_FALSE);
+        GXInitTexObjLOD(mDoGph_gInf_c::getZbufferTexObj(), GX_NEAR, GX_NEAR, 0.0f, 0.0f, 0.0f,
+                        GX_FALSE, GX_FALSE, GX_ANISO_1);
+        GXInitTexObj(mDoGph_gInf_c::getFrameBufferTexObj(), frameBufferTex, halfWidth, halfHeight,
+                     static_cast<GXTexFmt>(mDoGph_gInf_c::getFrameBufferTimg()->format),
+                     GX_CLAMP, GX_CLAMP, GX_FALSE);
+        GXInitTexObjLOD(mDoGph_gInf_c::getFrameBufferTexObj(), GX_LINEAR, GX_LINEAR, 0.0f, 0.0f,
+                        0.0f, GX_FALSE, GX_FALSE, GX_ANISO_1);
+        GXPixModeSync();
+        GXInvalidateTexAll();
+        GXLoadTexObj(mDoGph_gInf_c::getFrameBufferTexObj(), GX_TEXMAP1);
+        GXLoadTexObj(mDoGph_gInf_c::getZbufferTexObj(), GX_TEXMAP0);
+    }
+
+    HookAction on_draw_depth2_pre(ModContext *, void *args, void *, void *)
     {
         if (!g_settings.enabled)
             return HOOK_CONTINUE;
@@ -708,6 +762,10 @@ namespace
                 cLib_addCalc(&g_env_light.field_0x1264, focusTarget, SREG_F(5) + 0.1f,
                              SREG_F(4) + 100.0f, 0.0001f);
             }
+
+            auto *port = mods::arg<view_port_class *>(args, 1);
+            if (port != nullptr)
+                capture_depth2_targets(port);
         }
 
         return HOOK_SKIP_ORIGINAL;
