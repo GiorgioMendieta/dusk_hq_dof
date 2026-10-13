@@ -116,8 +116,7 @@ namespace
         s.ambientFarDistance = static_cast<float>(
             std::clamp<int64_t>(get_int_option(g_cvarAmbientFarDistance, kDefAmbientFarDistance), 0, 20000));
         s.maxBlurFrac = static_cast<float>(
-                            std::clamp<int64_t>(get_int_option(g_cvarMaxBlur, kDefMaxBlur), 1, 60)) /
-                        1000.0f;
+            std::clamp<int64_t>(get_int_option(g_cvarMaxBlur, kDefMaxBlur), 1, 60)) / 1000.0f;
         s.minRange = static_cast<float>(
             std::clamp<int64_t>(get_int_option(g_cvarMinFocusRange, kDefMinFocusRange), 0, 2000));
         s.farPct = pct(g_cvarFarFalloff, kDefFarFalloff, 10, 1000);
@@ -707,21 +706,21 @@ namespace
         add_toggle(left, "Enabled", g_cvarEnabled,
                    "Enable the Depth of Field effect. Note: Set the built-in depth of field to Off while this mod is enabled (Settings > Video > Post-processing > Depth of Field).");
         add_number(left, "Intensity", g_cvarIntensity, 0, 200, 5, "%",
-                   "Overall multiplier on the DoF effect strength.");
-        add_number(left, "Max Blur", g_cvarMaxBlur, 1, 60, 1, " /1000 of height",
-                   "Blur radius at full defocus, as a fraction of screen height. 10 is about 11 px at 1080p, or 21 px at 4K.");
+                   "Overall multiplier on the effect strength.");
+        add_number(left, "Max Blur Size", g_cvarMaxBlur, 1, 60, 1, " /1000 of height",
+                   "Blur radius at full defocus, this setting affects performance. This is expressed as a fraction of screen height (10 is about 11 px at 1080p, or 21 px at 4K).");
 
         svc_ui->pane_add_section(mod_ctx, left, "Ambient Blur");
         add_toggle(left, "Ambient Blur", g_cvarAmbientEnabled,
                    "Enable a subtle DoF blur effect on distant objects during normal gameplay.");
         add_number(left, "Ambient Blur Intensity", g_cvarAmbientFarBlur, 0, 100, 5, "%",
-                   "Intensity of the ambient DoF effect.");
+                   "Intensity of the ambient blur effect.");
         add_number(left, "Ambient Blur Distance", g_cvarAmbientFarDistance, 0, 20000, 500, " units",
-                   "World-space units where ambient DoF begins.");
+                   "World-space units where ambient blur begins.");
 
         svc_ui->pane_add_section(mod_ctx, left, "Focus");
         add_number(left, "Focus Range", g_cvarMinFocusRange, 0, 2000, 25, " units",
-               "World-space radius of the sharp zone around the focus distance.");
+                   "World-space radius of the sharp zone around the focus distance.");
         add_number(left, "Far Falloff", g_cvarFarFalloff, 25, 1000, 25, "%",
                    "Controls how quickly distant objects transition from sharp to fully blurred.");
         add_number(left, "Near Falloff", g_cvarNearFalloff, 25, 1000, 25, "%",
