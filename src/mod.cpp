@@ -6,6 +6,7 @@
 #include "d/d_camera.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_kankyo.h"
+#include "d/d_s_play.h"
 #include "f_op/f_op_camera_mng.h"
 #include "f_op/f_op_view.h"
 #include "m_Do/m_Do_graphic.h"
@@ -20,7 +21,6 @@
 #include "mods/svc/ui.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <type_traits>
@@ -602,7 +602,7 @@ namespace
         svc_gfx->resolve_pass(mod_ctx, &closeDesc, &scratch);
     }
 
-    // Runs after the original drawDepth2 (which has already updated g_env_light.field_0x1264).
+    // Runs after the pre-hook has updated g_env_light.field_0x1264.
     void on_draw_depth2_post(ModContext *, void *args, void *, void *)
     {
         if (!g_settings.enabled || daPy_getLinkPlayerActorClass() == nullptr)
@@ -663,6 +663,56 @@ namespace
         svc_gfx->push_draw(mod_ctx, g_drawComposite, &compositePayload, sizeof(compositePayload));
     }
 
+    HookAction on_draw_depth2_pre(ModContext *, void *, void *, void *)
+    {
+        if (!g_settings.enabled)
+            return HOOK_CONTINUE;
+
+        if (daPy_getLinkPlayerActorClass() != nullptr) {
+#if DEBUG
+            if (g_envHIO.mOther.mDepthOfField)
+#endif
+            {
+                f32 focusTarget = -255.0f;
+
+                if (dCam_getBody()->Mode() != 4 && dCam_getBody()->Mode() != 7) {
+                    int cameraId = dComIfGp_getPlayerCameraID(0);
+                    camera_process_class *cameraProcess = dComIfGp_getCamera(cameraId);
+                    dAttention_c *attention = dComIfGp_getAttention();
+
+                    f32 fovScale = cameraProcess != nullptr ? fopCamM_GetFovy(cameraProcess) : 48.0f;
+                    fovScale = 60.0f / fovScale;
+
+                    if (attention->LockonTruth()) {
+                        camera_class *camera = (camera_class *)dComIfGp_getCamera(0);
+                        fopAc_ac_c *attentionActor =
+                            fopAcM_SearchByID(daPy_getLinkPlayerActorClass()->getAtnActorID());
+
+                        if (attentionActor != nullptr) {
+                            f32 blend = attentionActor->current.pos.abs(camera->view.lookat.eye) /
+                                        ((SREG_F(2) + 280.0f) * fovScale);
+                            blend -= 0.8f;
+                            blend = cLib_minMaxLimit<f32>(blend, 0.0f, 1.0f);
+                            focusTarget = -180.0f - 75.0f * blend;
+                        }
+                    } else if (dComIfGp_event_runCheck() && fovScale < 3.0f &&
+                               g_env_light.field_0x126c < 999999.0f) {
+                        f32 blend = g_env_light.field_0x126c /
+                                    ((SREG_F(2) + 80.0f) * fovScale);
+                        blend -= 0.8f;
+                        blend = cLib_minMaxLimit<f32>(blend, 0.0f, 1.0f);
+                        focusTarget = -180.0f - 75.0f * blend;
+                    }
+                }
+
+                cLib_addCalc(&g_env_light.field_0x1264, focusTarget, SREG_F(5) + 0.1f,
+                             SREG_F(4) + 100.0f, 0.0001f);
+            }
+        }
+
+        return HOOK_SKIP_ORIGINAL;
+    }
+
     DEFINE_HOOK_SYMBOL("drawDepth2", void(view_class *, view_port_class *, int), DrawDepth2);
 
     // ---------------------------------------------------------------------------------------------
@@ -704,7 +754,7 @@ namespace
 
         svc_ui->pane_add_section(mod_ctx, left, "Effect");
         add_toggle(left, "Enabled", g_cvarEnabled,
-                   "Enable the Depth of Field effect. Note: Set the built-in depth of field to Off while this mod is enabled (Settings > Video > Post-processing > Depth of Field).");
+               "Enable the Depth of Field effect.");
         add_number(left, "Intensity", g_cvarIntensity, 0, 200, 5, "%",
                    "Overall multiplier on the effect strength.");
         add_number(left, "Max Blur Size", g_cvarMaxBlur, 1, 60, 1, " /1000 of height",
@@ -760,9 +810,7 @@ namespace
     {
       add_toggle(
           panel, "Enabled", g_cvarEnabled,
-          "Enable the Depth of Field effect. Note: Set the built-in "
-          "depth of field to Off while this mod is enabled (Settings > "
-          "Video > Post-processing > Depth of Field).");
+          "Enable the Depth of Field effect.");
       UiControlDesc control = UI_CONTROL_DESC_INIT;
       control.kind = UI_CONTROL_BUTTON;
       control.label = "Open Controls";
@@ -831,7 +879,8 @@ extern "C"
         if (svc_gfx->register_draw_type(mod_ctx, &drawDesc, &g_drawComposite) != MOD_OK)
             return fail_init(error, MOD_ERROR, "failed to register draw type");
 
-        if (mods::hook::add_post<DrawDepth2>(on_draw_depth2_post) != MOD_OK)
+        if (mods::hook::add_pre<DrawDepth2>(on_draw_depth2_pre) != MOD_OK ||
+            mods::hook::add_post<DrawDepth2>(on_draw_depth2_post) != MOD_OK)
             return fail_init(error, MOD_UNAVAILABLE, "failed to hook drawDepth2");
 
         UiModsPanelDesc panelDesc = UI_MODS_PANEL_DESC_INIT;

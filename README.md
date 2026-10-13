@@ -6,7 +6,7 @@
 
 Replaces the built-in depth of field for a more cinematic look, optionally blurring far-away objects slightly during normal gameplay, not just during cutscenes or cinematic moments.
 
-**IMPORTANT: Set the built-in depth of field option to Off while this mod is enabled (Settings > Video > Post-processing > Depth of Field).**
+The built-in depth of field pass is skipped automatically while this mod is enabled.
 
 Based on Jorge Jimenez's "NEXT GENERATION POST PROCESSING IN CALL OF DUTY: ADVANCED WARFARE" SIGGRAPH 2014 course notes.
 
