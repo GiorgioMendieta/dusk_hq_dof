@@ -1,7 +1,7 @@
 {
   "id": "com.giorgiomendieta.dof_hq",
   "name": "Cinematic Depth of Field",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "author": "Giorgio Mendieta",
-  "description": "Replaces the built-in depth of field for a more cinematic look, optionally blurring objects in the distance during normal gameplay. The built-in depth of field pass is skipped automatically while this mod is enabled."
+  "description": "Replaces the built-in depth of field for a more cinematic look, optionally blurring objects in the distance during normal gameplay."
 }
